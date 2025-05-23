@@ -2,7 +2,7 @@
 ## Usage
 ```shell
 $ egg [filename...|transform...]
-```: 
+```
 The `egg` tool will read the string to be transformed from standard input. The transformed string will be written to standard output.
 
 ## Example
