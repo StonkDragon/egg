@@ -1,7 +1,7 @@
 # `egg` text transformer
 ## Usage
 ```shell
-$ egg [transform...]
+$ echo "<something>" | egg [transform...]
 ```
 The `egg` tool will read the string to be transformed from standard input. The transformed string will be written to standard output.
 
@@ -51,10 +51,11 @@ hell!
 - `x<char|string>`: Removes all instances of the specified character or string from the string.
 - `E(<transform...>)`: Executes the given transformations for each character in the string seperately.
 - `'file'`: Executes all transformations in the specified file (called `file.basket`). Can be a path.
-- `{<from: string> = <to: string>}`: Replaces all instances of `<from>` with `<to>`. This can be used to replace characters or strings in the input. For example, `{'H' = 'G'}` will replace all instances of `H` with `G`. Multiple replacements can be chained together, such as `{'H' = 'G' 'o' = 'a'}` to replace both `H` and `o` in one go.
+- `{<from: string> = <to: string>}`: Replaces all instances of `<from>` with `<to>`. This can be used to replace characters or strings in the input. For example, `{'H' = 'G'}` will replace all instances of `H` with `G`. Multiple replacements can be chained together, such as `{'H' = 'G' 'o' = 'a'}` to replace both `H` and `o` in one go. If `<from>` is the empty string, it will match every character in the string, allowing you to apply a transformation to every character. For example, `{'' = '_'}` will replace all characters with `_`, effectively replacing the entire string with underscores.
 - `L<length>`: Limits the string to the specified length. If the string is longer than the specified length, it will be truncated.
 - `[<transform...>]`: Applies the specified transformations to each character in the string. The transformations will be applied in the order they are listed in the brackets. For example, `[u l]` will apply the `u` transformation to every even character and the `l` transformation to every odd character. This is useful for creating alternating patterns.
 - `@<index><transform>`: Applies the specified transformation only to the character at the specified index. The index is zero-based, so `@0u` will uppercase the first character of the string, while `@1l` will lowercase the second character. If the index is out of bounds, the transformation will be ignored.
+- `:<transform>`: Repeatedly applies the specified transformation to the string until it no longer changes. This is useful for transformations that deduplicate letters by substituting them, for example `{'aa' = 'a'}`.
 
 ### Notes
 - `string`s are specified in single quotes, e.g. `'Hello, world!'`.

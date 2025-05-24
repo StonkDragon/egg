@@ -469,9 +469,30 @@ char* tf_invert_case(char* input) {
 }
 
 char* file_contents(const char* filename) {
-    Nob_String_Builder sb = {0};
-    nob_read_entire_file(filename, &sb);
-    return sb.items;
+    FILE* file = fopen(filename, "rb");
+    if (!file) {
+        fprintf(stderr, "Error: Could not open file %s\n", filename);
+        return NULL;
+    }
+    fseek(file, 0, SEEK_END);
+    size_t size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    char* contents = malloc(size + 1);
+    if (!contents) {
+        fprintf(stderr, "Error: Could not allocate memory for file contents\n");
+        fclose(file);
+        return NULL;
+    }
+    size_t read_size = fread(contents, 1, size, file);
+    if (read_size != size) {
+        fprintf(stderr, "Error: Could not read file %s completely\n", filename);
+        free(contents);
+        fclose(file);
+        return NULL;
+    }
+    contents[size] = '\0'; // Null-terminate the string
+    fclose(file);
+    return contents;
 }
 
 char* file_contents_without_lines_with_hash(const char* filename) {
@@ -481,24 +502,17 @@ char* file_contents_without_lines_with_hash(const char* filename) {
     }
     // strip lines with #
     Nob_String_Builder sb = {0};
-    size_t k = 0;
-    char* line = strtok(contents, "\n");
-    while (line) {
-        char* start = line;
-        while (isspace(*line)) {
-            line++;
+    for (size_t i = 0; contents[i]; ++i) {
+        if (contents[i] == '#') {
+            // skip to end of line
+            while (contents[i] && contents[i] != '\n') i++;
+        } else {
+            nob_da_append(&sb, contents[i]);
         }
-        if (line[0] != '#') {
-            line = start;
-            nob_sb_append_cstr(&sb, line);
-            nob_da_append(&sb, '\n');
-        }
-        line = strtok(NULL, "\n");
     }
     nob_sb_append_null(&sb);
-    char* result = sb.items;
     FREE(contents);
-    return result;
+    return sb.items; // return the string builder's items as the result
 }
 
 char *find_file_path_fragment(const char *base_path, const char *needle, const char *relative_path, bool *found) {
@@ -1012,14 +1026,16 @@ char* run_transformation(const char* transformation, const char* input) {
                     char* file = find_in_multiple_dirs((const char**) dirs, 2, name);
                     nob_sb_free(home_dir);
                     if (!file) {
-                        FREE(name);
                         fprintf(stderr, "Could not find file: %s\n", name);
+                        FREE(name);
                         return result;
                     }
                     
                     char* file_content = file_contents_without_lines_with_hash(file);
                     if (!file_content) {
                         fprintf(stderr, "Could not read file: %s\n", file);
+                        FREE(file);
+                        FREE(name);
                         return result;
                     }
                     result = run_transformation(file_content, result);
@@ -1113,10 +1129,12 @@ char* run_transformation(const char* transformation, const char* input) {
                     for (size_t j = 0; result[j]; ++j) {
                         bool replaced = false;
                         for (size_t k = 0; k < match_replace.count; ++k) {
-                            if (strncmp(&result[j], match_replace.items[k].from, strlen(match_replace.items[k].from)) == 0) {
+                            size_t from_len = strlen(match_replace.items[k].from);
+                            if (strncmp(&result[j], match_replace.items[k].from, from_len) == 0) {
                                 nob_sb_append_cstr(&new_result, match_replace.items[k].to);
-                                j += strlen(match_replace.items[k].from) - 1; // -1 because we will increment j in the loop
                                 replaced = true;
+                                j += from_len;
+                                if (from_len) j--;
                                 break;
                             }
                         }
