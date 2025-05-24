@@ -1,9 +1,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 
 #define NOB_IMPLEMENTATION
 #include <nob.h>
+
+typedef struct {
+    Nob_String_Builder* items;
+    size_t count;
+    size_t capacity;
+} String_List;
 
 #define FREE(ptr) do { if ((ptr)) free((void*) (ptr)); (ptr) = NULL; } while(0)
 
@@ -17,6 +24,10 @@ const char unescaped_chars[] = {
     ['v'] = '\v',
     ['a'] = '\a',
     ['0'] = '\0',
+    ['\\'] = '\\',
+    ['\''] = '\'',
+    ['\"'] = '\"',
+    ['x'] = 0 // 'x' is used for hex escape sequences
 };
 
 char* tf_upper(char* input) {
@@ -69,6 +80,23 @@ char* tf_capitalize(char* input) {
         } else if (capitalize_next) {
             result[i] = toupper(result[i]);
             capitalize_next = false;
+        }
+    }
+    FREE(input);
+    return result;
+}
+char* tf_decapitalize(char* input) {
+    if (!input) {
+        return NULL;
+    }
+    char* result = strdup(input);
+    bool decapitalize_next = true;
+    for (size_t i = 0; result[i]; ++i) {
+        if (isspace(result[i])) {
+            decapitalize_next = true;
+        } else if (decapitalize_next) {
+            result[i] = tolower(result[i]);
+            decapitalize_next = false;
         }
     }
     FREE(input);
@@ -441,17 +469,8 @@ char* tf_invert_case(char* input) {
 }
 
 char* file_contents(const char* filename) {
-    FILE* file = fopen(filename, "r");
-    if (!file) {
-        return NULL;
-    }
     Nob_String_Builder sb = {0};
-    char line[512];
-    while (fgets(line, sizeof(line), file) != NULL) {
-        nob_sb_append_cstr(&sb, line);
-    }
-    nob_sb_append_null(&sb);
-    fclose(file);
+    nob_read_entire_file(filename, &sb);
     return sb.items;
 }
 
@@ -482,6 +501,136 @@ char* file_contents_without_lines_with_hash(const char* filename) {
     return result;
 }
 
+char *find_file_path_fragment(const char *base_path, const char *needle, const char *relative_path, bool *found) {
+    DIR *dir = opendir(base_path);
+    if (!dir) return NULL;
+
+    struct dirent *dp;
+    while ((dp = readdir(dir)) != NULL && !*found) {
+        if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0)
+            continue;
+
+        char full_path[4096];
+        snprintf(full_path, sizeof(full_path), "%s/%s", base_path, dp->d_name);
+
+        char new_rel_path[4096];
+        if (relative_path[0])
+            snprintf(new_rel_path, sizeof(new_rel_path), "%s/%s", relative_path, dp->d_name);
+        else
+            snprintf(new_rel_path, sizeof(new_rel_path), "%s", dp->d_name);
+
+        struct stat st;
+        if (stat(full_path, &st) != 0) continue;
+
+        if (S_ISDIR(st.st_mode)) {
+            char *result = find_file_path_fragment(full_path, needle, new_rel_path, found);
+            if (*found) {
+                closedir(dir);
+                return result;
+            }
+        } else if (S_ISREG(st.st_mode)) {
+            if (strstr(new_rel_path, needle)) {
+                *found = true;
+                closedir(dir);
+                return strdup(full_path);
+            }
+        }
+    }
+
+    closedir(dir);
+    return NULL;
+}
+
+char *find_in_multiple_dirs(const char **dirs, size_t dir_count, const char *needle) {
+    for (size_t i = 0; i < dir_count; ++i) {
+        bool found = false;
+        char *match = find_file_path_fragment(dirs[i], needle, "", &found);
+        if (found)
+            return match;
+    }
+    return NULL;
+}
+
+Nob_String_Builder read_transformation(const char* transformation, size_t* i) {
+    #define i (*i)
+    Nob_String_Builder trans = {0};
+    while (isspace(transformation[i])) i++;
+    if (transformation[i] == '{') {
+        int brace_depth = 0;
+        nob_da_append(&trans, '{');
+        i++;
+        while ((transformation[i] != '}' || brace_depth > 0) && transformation[i] != 0) {
+            if (transformation[i] == '{') {
+                brace_depth++;
+            } else if (transformation[i] == '}') {
+                brace_depth--;
+            }
+            nob_da_append(&trans, transformation[i]);
+            i++;
+        }
+        if (transformation[i] == '}') {
+            nob_da_append(&trans, '}');
+        } else {
+            fprintf(stderr, "Error: Unmatched '{' in transformation.\n");
+        }
+    } else if (transformation[i] == '[') {
+        int bracket_depth = 0;
+        nob_da_append(&trans, '[');
+        i++;
+        while ((transformation[i] != ']' || bracket_depth > 0) && transformation[i] != 0) {
+            if (transformation[i] == '[') {
+                bracket_depth++;
+            } else if (transformation[i] == ']') {
+                bracket_depth--;
+            }
+            nob_da_append(&trans, transformation[i]);
+            i++;
+        }
+        if (transformation[i] == ']') {
+            nob_da_append(&trans, ']');
+        } else {
+            fprintf(stderr, "Error: Unmatched '[' in transformation.\n");
+        }
+    } else if (transformation[i] == '(') {
+        int paren_depth = 0;
+        i++;
+        while ((transformation[i] != ')' || paren_depth > 0) && transformation[i] != 0) {
+            if (transformation[i] == '(') {
+                paren_depth++;
+            } else if (transformation[i] == ')') {
+                paren_depth--;
+            }
+            nob_da_append(&trans, transformation[i]);
+            i++;
+        }
+        if (transformation[i] != ')') {
+            fprintf(stderr, "Error: Unmatched '(' in transformation.\n");
+        }
+    } else {
+        // single char
+        if (transformation[i] == '\\') {
+            nob_da_append(&trans, transformation[i]);
+            i++;
+        }
+        nob_da_append(&trans, transformation[i]);
+    }
+    nob_sb_append_null(&trans);
+    #undef i
+    return trans;
+}
+
+int sort_match_replace(const void* va, const void* vb) {
+    const char* a = *(const char**) va;
+    const char* b = *(const char**) vb;
+    // Sort by length first, then lexicographically
+    size_t len_a = strlen(a);
+    size_t len_b = strlen(b);
+    if (len_a != len_b) {
+        return len_b - len_a;
+    }
+    return -strcmp(a, b);
+}
+
 char* run_transformation(const char* transformation, const char* input) {
     if (!input || !transformation) {
         return NULL;
@@ -502,6 +651,7 @@ char* run_transformation(const char* transformation, const char* input) {
             case 'l': result = tf_lower(result); break;
             case 'r': result = tf_reverse(result); break;
             case 'C': result = tf_capitalize(result); break;
+            case 'D': result = tf_decapitalize(result); break;
             case 'd': result = tf_duplicate(result); break;
             case 's': result = tf_strip(result); break;
             case 't': result = tf_trim(result); break;
@@ -523,6 +673,7 @@ char* run_transformation(const char* transformation, const char* input) {
                     Nob_String_Builder sb = {0};
                     nob_sb_append_cstr(&sb, result);
                     i++;
+                    while (isspace(transformation[i])) i++;
                     if (transformation[i] != '\'') {
                         // just one char
                         if (transformation[i] == '\\') {
@@ -579,6 +730,7 @@ char* run_transformation(const char* transformation, const char* input) {
                 {
                     Nob_String_Builder sb = {0};
                     i++;
+                    while (isspace(transformation[i])) i++;
                     if (transformation[i] != '\'') {
                         // just one char
                         if (transformation[i] == '\\') {
@@ -643,6 +795,7 @@ char* run_transformation(const char* transformation, const char* input) {
                 {
                     Nob_String_Builder sb = {0};
                     i++;
+                    while (isspace(transformation[i])) i++;
                     if (transformation[i] != '\'') {
                         // just one char
                         if (transformation[i] == '\\') {
@@ -693,84 +846,26 @@ char* run_transformation(const char* transformation, const char* input) {
                     nob_sb_append_null(&sb);
                     
                     size_t result_len = strlen(result);
-                    char* new_result = malloc(result_len + 1);
-                    if (!new_result) {
-                        FREE(result);
-                        return NULL;
-                    }
-                    size_t k = 0;
+                    Nob_String_Builder new_result = {0};
+
                     for (size_t j = 0; j < result_len; ++j) {
-                        bool found = false;
-                        for (size_t l = 0; l < sb.count; ++l) {
-                            if (result[j] == sb.items[l]) {
-                                found = true;
-                                break;
-                            }
-                        }
+                        bool found = strstr(&result[j], sb.items) == &result[j];
                         if (!found) {
-                            new_result[k++] = result[j];
+                            nob_da_append(&new_result, result[j]);
+                        } else {
+                            // skip the length of the string to remove
+                            j += sb.count - 2; // -1 because we will increment j in the loop
                         }
                     }
-                    new_result[k] = '\0';
+                    nob_sb_append_null(&new_result);
                     FREE(result);
-                    result = new_result;
+                    result = new_result.items;
                 }
+                break;
             case 'E': // For Each Char
                 {
-                    Nob_String_Builder trans = {0};
                     i++;
-                    if (transformation[i] == '(') {
-                        int paren_depth = 0;
-                        i++;
-                        while ((transformation[i] != ')' || paren_depth > 0) && transformation[i] != 0) {
-                            if (transformation[i] == '(') {
-                                paren_depth++;
-                            } else if (transformation[i] == ')') {
-                                paren_depth--;
-                            }
-                            if (transformation[i] == '\\') {
-                                i++;
-                                char unescaped = 0;
-                                switch (transformation[i]) {
-                                    case 'x': {
-                                        // hex
-                                        i++;
-                                        char hex[3] = {0};
-                                        hex[0] = transformation[i++];
-                                        hex[1] = transformation[i];
-                                        int value = (int)strtol(hex, NULL, 16);
-                                        unescaped = (char)value;
-                                    } break;
-                                    default:
-                                        unescaped = unescaped_chars[transformation[i]];
-                                        break;
-                                }
-                                if (unescaped) {
-                                    nob_da_append(&trans, unescaped);
-                                } else {
-                                    nob_sb_append_null(&trans);
-                                }
-                            } else {
-                                nob_da_append(&trans, transformation[i]);
-                            }
-                            i++;
-                        }
-                        nob_sb_append_null(&trans);
-                    } else {
-                        // single char
-                        if (transformation[i] == '\\') {
-                            i++;
-                            char unescaped = unescaped_chars[transformation[i]];
-                            if (unescaped) {
-                                nob_da_append(&trans, unescaped);
-                            } else {
-                                nob_sb_append_null(&trans);
-                            }
-                        } else {
-                            nob_da_append(&trans, transformation[i]);
-                        }
-                    }
-                    nob_sb_append_null(&trans);
+                    Nob_String_Builder trans = read_transformation(transformation, &i);
                     
                     Nob_String_Builder sb = {0};
                     for (size_t j = 0; result[j]; ++j) {
@@ -793,6 +888,41 @@ char* run_transformation(const char* transformation, const char* input) {
                     result = sb.items;
                 }
                 break;
+            case 'L': // limit length (e.g. l10)
+                {
+                    i++;
+                    while (isspace(transformation[i])) i++;
+                    int limit = 0;
+                    while (isdigit(transformation[i])) {
+                        limit = limit * 10 + (transformation[i] - '0');
+                        i++;
+                    }
+                    i--;
+                    if (limit < 0) {
+                        fprintf(stderr, "Invalid limit: %d\n", limit);
+                        return result;
+                    }
+                    size_t result_len = strlen(result);
+                    if (result_len > (size_t)limit) {
+                        char* new_result = malloc(limit + 1);
+                        if (!new_result) {
+                            FREE(result);
+                            return NULL;
+                        }
+                        strncpy(new_result, result, limit);
+                        new_result[limit] = '\0';
+                        FREE(result);
+                        result = new_result;
+                    } else {
+                        char* new = strdup(result); // ensure null-termination
+                        if (!new) {
+                            return NULL;
+                        }
+                        FREE(result);
+                        result = new;
+                    }
+                }
+                break;
             case '\'':
                 {
                     Nob_String_Builder command = {0};
@@ -801,123 +931,164 @@ char* run_transformation(const char* transformation, const char* input) {
                         nob_da_append(&command, transformation[i]);
                         i++;
                     }
-                    nob_sb_append_cstr(&command, ".eggscript");
+                    nob_sb_append_cstr(&command, ".basket");
                     nob_sb_append_null(&command);
-                    FILE* file = fopen(command.items, "r");
-                    if (!file) {
-                        fprintf(stderr, "Could not open file: %s\n", command.items);
+                    char* name = strdup(command.items);
+                    nob_sb_free(command);
+                    command = (Nob_String_Builder) {0};
+
+                    if (!name) {
+                        fprintf(stderr, "Could not allocate memory for file name.\n");
                         return result;
                     }
-                    fclose(file);
-                    char* file_content = file_contents_without_lines_with_hash(command.items);
+                    // look through all files in the current directory and ~/.egg/**/**/
+                    // if the file exists, read it and run the transformation
+                    char* home = getenv("HOME");
+                    Nob_String_Builder home_dir = {0};
+                    if (home) {
+                        nob_sb_append_cstr(&home_dir, home);
+                        nob_da_append(&home_dir, '/');
+                    } else {
+                        fprintf(stderr, "Could not find HOME environment variable.\n");
+                        FREE(name);
+                        return result;
+                    }
+                    nob_sb_append_cstr(&home_dir, ".egg");
+                    nob_sb_append_null(&home_dir);
+                    char* dirs[] = {
+                        home_dir.items,
+                        ".",
+                    };
+                    
+                    // add the current directory and ~/.egg/ to the search paths
+                    char* file = find_in_multiple_dirs((const char**) dirs, 2, name);
+                    nob_sb_free(home_dir);
+                    if (!file) {
+                        FREE(name);
+                        fprintf(stderr, "Could not find file: %s\n", name);
+                        return result;
+                    }
+                    
+                    char* file_content = file_contents_without_lines_with_hash(file);
                     if (!file_content) {
-                        fprintf(stderr, "Could not read file: %s\n", command.items);
+                        fprintf(stderr, "Could not read file: %s\n", file);
                         return result;
                     }
                     result = run_transformation(file_content, result);
                     FREE(file_content);
                     FREE(command.items);
+                    FREE(file);
+                    FREE(name);
                 }
                 break;
             case '{': // match and replace
                 {
-                    char map[256] = {0};
+                    struct {
+                        struct match_replace {
+                            char* from;
+                            char* to;
+                        }* items;
+                        size_t count;
+                        size_t capacity;
+                    } match_replace = {0};
                     i++;
+                    
                     while (transformation[i] != '}' && transformation[i] != 0) {
+                        Nob_String_Builder from = {0};
+                        Nob_String_Builder to = {0};
                         while (isspace(transformation[i])) i++;
-                        char from = transformation[i++];
+                        if (transformation[i] == '\'') {
+                            i++;
+                            while (transformation[i] != '\'' && transformation[i] != 0) {
+                                if (transformation[i] == '\\') {
+                                    i++;
+                                    char unescaped = unescaped_chars[transformation[i]];
+                                    if (unescaped) {
+                                        nob_da_append(&from, unescaped);
+                                    }
+                                } else {
+                                    nob_da_append(&from, transformation[i]);
+                                }
+                                i++;
+                            }
+                        } else {
+                            fprintf(stderr, "Error: Expected ' after match string.\n");
+                            nob_sb_free(from);
+                            nob_sb_free(to);
+                            FREE(result);
+                            return NULL;
+                        }
+                        nob_sb_append_null(&from);
+                        i++;
                      
                         while (isspace(transformation[i])) i++;
                         i++; // skip '='
                      
                         while (isspace(transformation[i])) i++;
-                        char to = transformation[i++];
-                     
+                        if (transformation[i] == '\'') {
+                            i++;
+                            while (transformation[i] != '\'' && transformation[i] != 0) {
+                                if (transformation[i] == '\\') {
+                                    i++;
+                                    char unescaped = unescaped_chars[transformation[i]];
+                                    if (unescaped) {
+                                        nob_da_append(&to, unescaped);
+                                    }
+                                } else {
+                                    nob_da_append(&to, transformation[i]);
+                                }
+                                i++;
+                            }
+                        } else {
+                            fprintf(stderr, "Error: Expected ' after replacement string.\n");
+                            nob_sb_free(from);
+                            nob_sb_free(to);
+                            FREE(result);
+                            return NULL;
+                        }
+                        
+                        nob_sb_append_null(&to);
+                        i++;
+
                         while (isspace(transformation[i])) i++;
-                        map[(unsigned char)from] = to;
+                        
+                        struct match_replace item = {
+                            .from = from.items,
+                            .to = to.items
+                        };
+                        nob_da_append(&match_replace, item);
                     }
-                    char* new_result = malloc(strlen(result) + 1);
-                    if (!new_result) {
-                        return NULL;
-                    }
+
+                    qsort(match_replace.items, match_replace.count, sizeof(struct match_replace), sort_match_replace);
+
+                    Nob_String_Builder new_result = {0};
                     for (size_t j = 0; result[j]; ++j) {
-                        new_result[j] = map[(unsigned char)result[j]] ? map[(unsigned char)result[j]] : result[j];
+                        bool replaced = false;
+                        for (size_t k = 0; k < match_replace.count; ++k) {
+                            if (strncmp(&result[j], match_replace.items[k].from, strlen(match_replace.items[k].from)) == 0) {
+                                nob_sb_append_cstr(&new_result, match_replace.items[k].to);
+                                j += strlen(match_replace.items[k].from) - 1; // -1 because we will increment j in the loop
+                                replaced = true;
+                                break;
+                            }
+                        }
+                        if (!replaced) {
+                            nob_da_append(&new_result, result[j]);
+                        }
                     }
-                    new_result[strlen(result)] = '\0';
+                    nob_sb_append_null(&new_result);
                     FREE(result);
-                    result = new_result;
+                    result = new_result.items;
                 }
                 break;
             case '[': // window of commands
                 {
-                    struct {
-                        Nob_String_Builder* items;
-                        size_t count;
-                        size_t capacity;
-                    } commands = {0};
+                    String_List commands = {0};
                     i++;
-                    Nob_String_Builder current = {0};
                     while (transformation[i] != ']' && transformation[i] != 0) {
-                        while (isspace(transformation[i])) i++;
-                        if (transformation[i] == '(') {
-                            i++;
-                            while (isspace(transformation[i])) i++;
-                            int paren_depth = 1;
-                            while ((transformation[i] != ')' || paren_depth > 0) && transformation[i] != 0) {
-                                if (transformation[i] == '(') {
-                                    paren_depth++;
-                                } else if (transformation[i] == ')') {
-                                    paren_depth--;
-                                }
-                                if (transformation[i] == '\\') {
-                                    i++;
-                                    char unescaped = 0;
-                                    switch (transformation[i]) {
-                                        case 'x': {
-                                            // hex
-                                            i++;
-                                            char hex[3] = {0};
-                                            hex[0] = transformation[i++];
-                                            hex[1] = transformation[i];
-                                            int value = (int)strtol(hex, NULL, 16);
-                                            unescaped = (char)value;
-                                        } break;
-                                        default:
-                                            unescaped = unescaped_chars[transformation[i]];
-                                            break;
-                                    }
-                                    if (unescaped) {
-                                        nob_da_append(&current, unescaped);
-                                    }
-                                } else {
-                                    nob_da_append(&current, transformation[i]);
-                                }
-                                while (isspace(transformation[i])) i++;
-                                i++;
-                            }
-                            nob_sb_append_null(&current);
-                            nob_da_append(&commands, current);
-                            current = (Nob_String_Builder){0};
-                        } else if (transformation[i] == '\\') {
-                            i++;
-                            char unescaped = unescaped_chars[transformation[i]];
-                            if (unescaped) {
-                                nob_da_append(&current, unescaped);
-                            }
-                            nob_sb_append_null(&current);
-                            nob_da_append(&commands, current);
-                            current = (Nob_String_Builder){0};
-                        } else {
-                            nob_da_append(&current, transformation[i]);
-                            nob_sb_append_null(&current);
-                            nob_da_append(&commands, current);
-                            current = (Nob_String_Builder){0};
-                        }
+                        Nob_String_Builder trans = read_transformation(transformation, &i);
+                        nob_da_append(&commands, trans);
                         i++;
-                    }
-                    if (current.count > 0) {
-                        nob_sb_append_null(&current);
-                        nob_da_append(&commands, current);
                     }
                     
                     size_t result_len = strlen(result);
@@ -950,6 +1121,25 @@ char* run_transformation(const char* transformation, const char* input) {
                     nob_da_free(commands);
                 }
                 break;
+            case ':': // repeat
+                {
+                    i++;
+                    Nob_String_Builder trans = read_transformation(transformation, &i);
+
+                    char* new_result = NULL;
+                    do {
+                        char* old_result = strdup(result);
+                        new_result = run_transformation(trans.items, result);
+                        if (new_result && strcmp(new_result, old_result) == 0) {
+                            FREE(old_result);
+                            result = new_result;
+                            break; // no change, stop repeating
+                        }
+                        FREE(old_result);
+                        result = new_result;
+                    } while (result != NULL);
+                }
+                break;
             case ' ':
             case '\t':
             case '\n':
@@ -973,23 +1163,7 @@ int main(int argc, char const *argv[]) {
         if (i > 1) {
             nob_sb_append_cstr(&transform, " ");
         }
-        FILE* file = fopen(argv[i], "r");
-        if (file) {
-            fclose(file);
-            char* file_content = file_contents_without_lines_with_hash(argv[i]);
-            if (!file_content) {
-                fprintf(stderr, "Error: Could not read file: %s\n", argv[i]);
-                return 1;
-            }
-            if (strlen(file_content) > 0) {
-                nob_sb_append_cstr(&transform, file_content);
-                FREE(file_content);
-            } else {
-                FREE(file_content);
-            }
-        } else {
-            nob_sb_append_cstr(&transform, argv[i]);
-        }
+        nob_sb_append_cstr(&transform, argv[i]);
     }
     nob_sb_append_null(&transform);
     const char* transformation = transform.items;

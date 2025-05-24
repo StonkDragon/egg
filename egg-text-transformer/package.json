@@ -1,0 +1,29 @@
+{
+  "name": "egg-text-transformer",
+  "displayName": "egg text transformer",
+  "description": "Syntax highlighting for egg .basket files",
+  "version": "0.0.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/StonkDragon/Egg"
+  },
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "egg-basket",
+      "aliases": ["Egg Basket File", "egg-basket"],
+      "extensions": [".basket"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "egg-basket",
+      "scopeName": "source.eggbasket",
+      "path": "./syntaxes/egg-basket.tmLanguage.json"
+    }]
+  }
+}

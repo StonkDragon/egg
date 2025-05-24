@@ -1,0 +1,60 @@
+{
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "Egg Basket File",
+	"patterns": [
+		{
+			"include": "#comment"
+		},
+		{
+			"include": "#substitution"
+		},
+		{
+			"include": "#string"
+		},
+		{
+			"include": "#transform"
+		}
+	],
+	"repository": {
+		"comment": {
+			"name": "comment.line.number-sign",
+			"match": "#.*$"
+		},
+		"transform": {
+			"patterns": [{
+				"name": "keyword.control",
+				"match": "(u|l|r|C|D|d|s|t|j|e|n|i|-|b|B|h|H|\\^|c|a|p|x|E|L[0-9]+|:|\\[|\\]|\\{|\\}|\\(|\\))"
+			}]
+		},
+		"substitution": {
+			"name": "meta.substitution",
+			"begin": "\\{",
+			"end": "\\}",
+			"patterns": [
+				{
+					"name": "meta.substitution.pair",
+					"match": "('([^']*)')\\s*(=)\\s*('([^']*)')",
+					"captures": {
+						"1": { "name": "string.quoted.single.key" },
+						"2": { "name": "string.quoted.single.key" },
+						"3": { "name": "keyword.operator.assignment" },
+						"4": { "name": "string.quoted.single.value" },
+						"5": { "name": "constant.other.value" }
+					}
+				}
+			]
+		},
+		"string": {
+			"name": "string.quoted.single",
+			"begin": "\\'",
+			"end": "\\'",
+			"patterns": [
+				{
+					"name": "constant.character.escape",
+					"match": "\\\\."
+				}
+			]
+		}
+	},
+	"scopeName": "source.eggbasket"
+}
