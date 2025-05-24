@@ -54,6 +54,7 @@ hell!
 - `{<from: string> = <to: string>}`: Replaces all instances of `<from>` with `<to>`. This can be used to replace characters or strings in the input. For example, `{'H' = 'G'}` will replace all instances of `H` with `G`. Multiple replacements can be chained together, such as `{'H' = 'G' 'o' = 'a'}` to replace both `H` and `o` in one go.
 - `L<length>`: Limits the string to the specified length. If the string is longer than the specified length, it will be truncated.
 - `[<transform...>]`: Applies the specified transformations to each character in the string. The transformations will be applied in the order they are listed in the brackets. For example, `[u l]` will apply the `u` transformation to every even character and the `l` transformation to every odd character. This is useful for creating alternating patterns.
+- `@<index><transform>`: Applies the specified transformation only to the character at the specified index. The index is zero-based, so `@0u` will uppercase the first character of the string, while `@1l` will lowercase the second character. If the index is out of bounds, the transformation will be ignored.
 
 ### Notes
 - `string`s are specified in single quotes, e.g. `'Hello, world!'`.

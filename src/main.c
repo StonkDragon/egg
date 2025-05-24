@@ -899,8 +899,7 @@ char* run_transformation(const char* transformation, const char* input) {
                     }
                     i--;
                     if (limit < 0) {
-                        fprintf(stderr, "Invalid limit: %d\n", limit);
-                        return result;
+                        return result; // invalid limit, return original result
                     }
                     size_t result_len = strlen(result);
                     if (result_len > (size_t)limit) {
@@ -921,6 +920,55 @@ char* run_transformation(const char* transformation, const char* input) {
                         FREE(result);
                         result = new;
                     }
+                }
+                break;
+            case '@': // only for nth char (e.g. @3)
+                {
+                    i++;
+                    while (isspace(transformation[i])) i++;
+                    int charN = 0;
+                    while (isdigit(transformation[i])) {
+                        charN = charN * 10 + (transformation[i] - '0');
+                        i++;
+                    }
+                    if (charN < 0) {
+                        return result; // invalid charN, return original result
+                    }
+
+                    size_t result_len = strlen(result);
+                    if (charN >= result_len) {
+                        return result; // no change if charN is out of bounds
+                    }
+
+                    Nob_String_Builder trans = read_transformation(transformation, &i);
+
+                    char* new_result = malloc(2);
+                    if (!new_result) {
+                        FREE(result);
+                        return NULL;
+                    }
+                    new_result[0] = result[charN];
+                    new_result[1] = '\0';
+                    char* transformed = run_transformation(trans.items, new_result);
+                    // insert the transformed char at the position of charN
+                    if (transformed) {
+                        char* new = malloc(result_len + strlen(transformed) + 1);
+                        if (!new) {
+                            FREE(transformed);
+                            FREE(result);
+                            return NULL;
+                        }
+                        strncpy(new, result, charN);
+                        strcpy(new + charN, transformed);
+                        strcpy(new + charN + strlen(transformed), result + charN + 1);
+                        FREE(result);
+                        result = new;
+                        FREE(transformed);
+                    } else {
+                        FREE(result);
+                        return NULL;
+                    }
+                    nob_sb_free(trans);
                 }
                 break;
             case '\'':
