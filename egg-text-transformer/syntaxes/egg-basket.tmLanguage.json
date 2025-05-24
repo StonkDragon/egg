@@ -9,10 +9,10 @@
 			"include": "#substitution"
 		},
 		{
-			"include": "#string"
+			"include": "#transform"
 		},
 		{
-			"include": "#transform"
+			"include": "#string"
 		}
 	],
 	"repository": {
@@ -23,7 +23,7 @@
 		"transform": {
 			"patterns": [{
 				"name": "keyword.control",
-				"match": "(u|l|r|C|D|d|s|t|j|e|n|i|-|b|B|h|H|\\^|c|a|p|x|E|L[0-9]+|:|\\[|\\]|\\{|\\}|\\(|\\))"
+				"match": "(u|l|r|C|D|d|s|t|j|e|n|i|-|b|B|h|H|\\^|c|a\\s*(?:'[^']*'|\\\\.|[^\\s\\\\'])|p\\s*(?:'[^']*'|\\\\.|[^\\s\\\\'])|x\\s*(?:'[^']*'|\\\\.|[^\\s\\\\'])|E|L[0-9]+|:|\\[|\\]|\\{|\\}|\\(|\\))"
 			}]
 		},
 		"substitution": {
