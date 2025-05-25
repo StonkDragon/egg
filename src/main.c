@@ -1163,7 +1163,9 @@ char* run_transformation(const char* transformation, const char* input) {
                         String_appendChar(&match_replace, item);
                     }
 
-                    qsort(match_replace.items, match_replace.count, sizeof(struct match_replace), sort_match_replace);
+                    if (match_replace.items) {
+                        qsort(match_replace.items, match_replace.count, sizeof(struct match_replace), sort_match_replace);
+                    }
 
                     String new_result = {0};
                     for (size_t j = 0; result[j]; ++j) {
@@ -1188,7 +1190,9 @@ char* run_transformation(const char* transformation, const char* input) {
                         free_or_die(&match_replace.items[k].from);
                         free_or_die(&match_replace.items[k].to);
                     }
-                    String_free(match_replace);
+                    if (match_replace.items) {
+                        String_free(match_replace);
+                    }
                 }
                 break;
             case '[': // window of commands
@@ -1201,6 +1205,11 @@ char* run_transformation(const char* transformation, const char* input) {
                         checkIncrement();
                     }
                     
+                    if (commands.count == 0) {
+                        // No commands, just return the result as is
+                        return result;
+                    }
+
                     size_t result_len = strlen(result);
                     String new_result = {0};
 
